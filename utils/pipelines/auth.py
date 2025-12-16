@@ -26,7 +26,7 @@ ALGORITHM = "HS256"
 # Auth Utils
 ##############
 
-bearer_security = HTTPBearer()
+bearer_security = HTTPBearer(auto_error=False)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
@@ -63,15 +63,10 @@ def extract_token_from_auth_header(auth_header: str):
     return auth_header[len("Bearer ") :]
 
 
-def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_security),
-) -> Optional[dict]:
-    token = credentials.credentials
-
-    if token != API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key",
-        )
-
-    return token
+def get_api_key(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_security),
+) -> Optional[str]:
+    if credentials is None:
+        return None
+    
+    return credentials.credentials

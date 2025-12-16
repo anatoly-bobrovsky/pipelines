@@ -5,10 +5,10 @@ from fastapi.concurrency import run_in_threadpool
 
 from starlette.responses import StreamingResponse, Response
 from pydantic import BaseModel, ConfigDict
-from typing import List, Union, Generator, Iterator
+from typing import List, Union, Generator, Iterator, Optional
 
 
-from utils.pipelines.auth import bearer_security, get_current_user
+from utils.pipelines.auth import bearer_security, get_api_key
 from utils.pipelines.main import get_last_user_message, stream_message_template
 from utils.pipelines.misc import convert_to_raw_url
 
@@ -44,7 +44,7 @@ log_level = os.getenv("GLOBAL_LOG_LEVEL", "INFO").upper()
 logging.basicConfig(level=LOG_LEVELS[log_level])
 
 
-def get_all_pipelines():
+def get_all_pipelines(api_key: Optional[str] = None):
     pipelines = {}
     for pipeline_id in PIPELINE_MODULES.keys():
         pipeline = PIPELINE_MODULES[pipeline_id]
@@ -55,7 +55,7 @@ def get_all_pipelines():
 
                 # Check if pipelines is a function or a list
                 if callable(pipeline.pipelines):
-                    manifold_pipelines = pipeline.pipelines()
+                    manifold_pipelines = pipeline.pipelines(api_key)
                 else:
                     manifold_pipelines = pipeline.pipelines
 
@@ -271,24 +271,13 @@ app.add_middleware(
 )
 
 
-@app.middleware("http")
-async def check_url(request: Request, call_next):
-    start_time = int(time.time())
-    app.state.PIPELINES = get_all_pipelines()
-    response = await call_next(request)
-    process_time = int(time.time()) - start_time
-    response.headers["X-Process-Time"] = str(process_time)
-
-    return response
-
-
 @app.get("/v1/models")
 @app.get("/models")
-async def get_models(user: str = Depends(get_current_user)):
+async def get_models(api_key: Optional[str] = Depends(get_api_key)):
     """
     Returns the available pipelines
     """
-    app.state.PIPELINES = get_all_pipelines()
+    app.state.PIPELINES = get_all_pipelines(api_key)
     return {
         "data": [
             {
@@ -329,8 +318,8 @@ async def get_status():
 
 @app.get("/v1/pipelines")
 @app.get("/pipelines")
-async def list_pipelines(user: str = Depends(get_current_user)):
-    if user == API_KEY:
+async def list_pipelines(api_key: Optional[str] = Depends(get_api_key)):
+    if api_key == API_KEY or api_key is None:
         return {
             "data": [
                 {
@@ -387,9 +376,9 @@ async def download_file(url: str, dest_folder: str):
 @app.post("/v1/pipelines/add")
 @app.post("/pipelines/add")
 async def add_pipeline(
-    form_data: AddPipelineForm, user: str = Depends(get_current_user)
+    form_data: AddPipelineForm, api_key: Optional[str] = Depends(get_api_key)
 ):
-    if user != API_KEY:
+    if api_key is not None and api_key != API_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key",
@@ -417,9 +406,9 @@ async def add_pipeline(
 @app.post("/v1/pipelines/upload")
 @app.post("/pipelines/upload")
 async def upload_pipeline(
-    file: UploadFile = File(...), user: str = Depends(get_current_user)
+    file: UploadFile = File(...), api_key: Optional[str] = Depends(get_api_key)
 ):
-    if user != API_KEY:
+    if api_key is not None and api_key != API_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key",
@@ -466,9 +455,9 @@ class DeletePipelineForm(BaseModel):
 @app.delete("/v1/pipelines/delete")
 @app.delete("/pipelines/delete")
 async def delete_pipeline(
-    form_data: DeletePipelineForm, user: str = Depends(get_current_user)
+    form_data: DeletePipelineForm, api_key: Optional[str] = Depends(get_api_key)
 ):
-    if user != API_KEY:
+    if api_key is not None and api_key != API_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key",
@@ -498,8 +487,8 @@ async def delete_pipeline(
 
 @app.post("/v1/pipelines/reload")
 @app.post("/pipelines/reload")
-async def reload_pipelines(user: str = Depends(get_current_user)):
-    if user == API_KEY:
+async def reload_pipelines(api_key: Optional[str] = Depends(get_api_key)):
+    if api_key == API_KEY or api_key is None:
         await reload()
         return {"message": "Pipelines reloaded successfully."}
     else:
@@ -612,7 +601,7 @@ async def filter_inlet(pipeline_id: str, form_data: FilterForm):
 
     try:
         if hasattr(pipeline, "inlet"):
-            body = await pipeline.inlet(form_data.body, form_data.user)
+            body = await pipeline.inlet(form_data.body, form_data.api_key)
             return body
         else:
             return form_data.body
@@ -644,7 +633,7 @@ async def filter_outlet(pipeline_id: str, form_data: FilterForm):
 
     try:
         if hasattr(pipeline, "outlet"):
-            body = await pipeline.outlet(form_data.body, form_data.user)
+            body = await pipeline.outlet(form_data.body, form_data.api_key)
             return body
         else:
             return form_data.body
@@ -658,7 +647,10 @@ async def filter_outlet(pipeline_id: str, form_data: FilterForm):
 
 @app.post("/v1/chat/completions")
 @app.post("/chat/completions")
-async def generate_openai_chat_completion(form_data: OpenAIChatCompletionForm):
+async def generate_openai_chat_completion(
+    form_data: OpenAIChatCompletionForm,
+    api_key: Optional[str] = Depends(get_api_key)
+):
     messages = [message.model_dump() for message in form_data.messages]
     user_message = get_last_user_message(messages)
 
@@ -693,6 +685,7 @@ async def generate_openai_chat_completion(form_data: OpenAIChatCompletionForm):
                     model_id=pipeline_id,
                     messages=messages,
                     body=form_data.model_dump(),
+                    api_key=api_key,
                 )
                 logging.info(f"stream:true:{res}")
 
@@ -749,6 +742,7 @@ async def generate_openai_chat_completion(form_data: OpenAIChatCompletionForm):
                 model_id=pipeline_id,
                 messages=messages,
                 body=form_data.model_dump(),
+                api_key=api_key,
             )
             logging.info(f"stream:false:{res}")
 
