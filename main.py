@@ -60,18 +60,11 @@ def get_all_pipelines(api_key: Optional[str] = None):
                     manifold_pipelines = pipeline.pipelines
 
                 for p in manifold_pipelines:
-                    manifold_pipeline_id = f'{pipeline_id}.{p["id"]}'
-
                     manifold_pipeline_name = p["name"]
-                    if hasattr(pipeline, "name"):
-                        manifold_pipeline_name = (
-                            f"{pipeline.name}{manifold_pipeline_name}"
-                        )
-
-                    pipelines[manifold_pipeline_id] = {
+                    pipelines[manifold_pipeline_name] = {
                         "module": pipeline_id,
                         "type": pipeline.type if hasattr(pipeline, "type") else "pipe",
-                        "id": manifold_pipeline_id,
+                        "id": manifold_pipeline_name,  # for nice displaying
                         "name": manifold_pipeline_name,
                         "valves": (
                             pipeline.valves if hasattr(pipeline, "valves") else None
@@ -672,8 +665,7 @@ async def generate_openai_chat_completion(
         print(pipeline_id)
 
         if pipeline["type"] == "manifold":
-            manifold_id, pipeline_id = pipeline_id.split(".", 1)
-            pipe = PIPELINE_MODULES[manifold_id].pipe
+            pipe = PIPELINE_MODULES[pipeline["module"]].pipe
         else:
             pipe = PIPELINE_MODULES[pipeline_id].pipe
 
