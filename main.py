@@ -633,9 +633,10 @@ async def filter_outlet(pipeline_id: str, form_data: FilterForm):
 @app.post("/v1/chat/completions")
 @app.post("/chat/completions")
 async def generate_openai_chat_completion(
+    request: Request,
     form_data: OpenAIChatCompletionForm,
-    api_key: Optional[str] = Depends(get_api_key)
 ):
+    headers = dict(request.headers)
     messages = [message.model_dump() for message in form_data.messages]
     user_message = get_last_user_message(messages)
 
@@ -669,7 +670,7 @@ async def generate_openai_chat_completion(
                     model_id=pipeline_id,
                     messages=messages,
                     body=form_data.model_dump(),
-                    api_key=api_key,
+                    headers=headers,
                 )
                 logging.info(f"stream:true:{res}")
 
@@ -726,7 +727,7 @@ async def generate_openai_chat_completion(
                 model_id=pipeline_id,
                 messages=messages,
                 body=form_data.model_dump(),
-                api_key=api_key,
+                headers=headers,
             )
             logging.info(f"stream:false:{res}")
 
